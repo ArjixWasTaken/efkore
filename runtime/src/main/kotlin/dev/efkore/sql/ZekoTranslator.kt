@@ -28,6 +28,7 @@ private fun unwrapChain(expr: Expression): QueryChain {
             is FilterExpression -> { filter = current; current = current.source }
             is ProjectExpression -> { project = current; current = current.source }
             is OrderByExpression -> { orderBys.add(0, current.keySelector to current.descending); current = current.source }
+            is ThenByExpression -> { orderBys.add(0, current.keySelector to current.descending); current = current.source }
             is LimitExpression -> { limit = current.count; current = current.source }
             is OffsetExpression -> { offset = current.count; current = current.source }
             is DistinctExpression -> { distinct = true; current = current.source }
@@ -40,6 +41,40 @@ private fun unwrapChain(expr: Expression): QueryChain {
 class ZekoTranslator {
 
     fun translate(root: Expression): SqlAndParams {
+        return when (root) {
+            is CountExpression -> translateAgg("COUNT(*)", root.source)
+            is SumExpression -> translateAgg("SUM(${columnName(root.selector.body)})", root.source)
+            is AvgExpression -> translateAgg("AVG(${columnName(root.selector.body)})", root.source)
+            is MinExpression -> translateAgg("MIN(${columnName(root.selector.body)})", root.source)
+            is MaxExpression -> translateAgg("MAX(${columnName(root.selector.body)})", root.source)
+            is FindExpression -> translateFind(root)
+            else -> translateChain(root)
+        }
+    }
+
+    private fun translateAgg(aggExpr: String, source: Expression): SqlAndParams {
+        val params = mutableListOf<Any?>()
+        val chain = unwrapChain(source)
+        val table = tableName(chain.root.entityType)
+        val sb = StringBuilder("SELECT $aggExpr FROM \"$table\"")
+        chain.filter?.let {
+            sb.append(" WHERE ")
+            sb.append(buildCondition(it.predicate.body, params))
+        }
+        return SqlAndParams(sb.toString(), params)
+    }
+
+    private fun translateFind(expr: FindExpression): SqlAndParams {
+        val params = mutableListOf<Any?>()
+        val table = tableName(expr.entityType)
+        val wheres = expr.keyValues.entries.joinToString(" AND ") { (key, value) ->
+            params.add(value)
+            "\"${key.lowercase()}\" = ?"
+        }
+        return SqlAndParams("SELECT * FROM \"$table\" WHERE $wheres", params)
+    }
+
+    private fun translateChain(root: Expression): SqlAndParams {
         val chain = unwrapChain(root)
         val params = mutableListOf<Any?>()
         val table = tableName(chain.root.entityType)
@@ -98,6 +133,18 @@ class ZekoTranslator {
             }
         }
         is UnaryExpression -> "NOT (${buildCondition(expr.operand, params)})"
+        is StartsWithExpression -> {
+            params.add("${expr.value.value}%")
+            "${columnName(expr.source)} LIKE ?"
+        }
+        is ContainsExpression -> {
+            params.add("%${expr.value.value}%")
+            "${columnName(expr.source)} LIKE ?"
+        }
+        is EndsWithExpression -> {
+            params.add("%${expr.value.value}")
+            "${columnName(expr.source)} LIKE ?"
+        }
         else -> throw IllegalArgumentException("Unsupported expression in condition: $expr")
     }
 

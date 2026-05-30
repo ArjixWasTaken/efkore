@@ -33,6 +33,24 @@ class DbSet<T : Any>(
     fun distinct(): DbSet<T> =
         DbSet(entityType, context, DistinctExpression(expression))
 
+    fun thenBy(keySelector: LambdaExpression): DbSet<T> =
+        DbSet(entityType, context, ThenByExpression(expression, keySelector, descending = false))
+
+    fun thenByDescending(keySelector: LambdaExpression): DbSet<T> =
+        DbSet(entityType, context, ThenByExpression(expression, keySelector, descending = true))
+
+    suspend fun find(vararg keys: Any?): T? {
+        val model = context.model(entityType)
+        val keyColumns = model.columns.filter { it.isKey }
+        val keyValues = keyColumns.zip(keys.toList()).associate { (col, value) ->
+            col.columnName to value
+        }
+        val findExpr = FindExpression(entityType, keyValues)
+        val (sql, params) = translator.translate(findExpr)
+        val rows = context.executor.execute(sql, params)
+        return rows.map { Materializer(entityType, model).materialize(it) }.firstOrNull()
+    }
+
     suspend fun toList(): List<T> {
         val (sql, params) = translator.translate(expression)
         val rows = context.executor.execute(sql, params)

@@ -39,7 +39,13 @@ class ChangeTracker<T : Any>(
     fun getChanges(): List<EntityEntry<T>> =
         entries.filter { it.state != EntityState.Unchanged }
 
-    private fun takeSnapshot(entity: T): Map<String, Any?> {
+    fun acceptChanges() {
+        for (i in entries.indices) {
+            entries[i] = entries[i].copy(state = EntityState.Unchanged)
+        }
+    }
+
+    fun takeSnapshot(entity: T): Map<String, Any?> {
         val map = mutableMapOf<String, Any?>()
         entityType.java.methods
             .filter { it.name.startsWith("get") && it.parameterCount == 0 && it.declaringClass != Any::class.java }
