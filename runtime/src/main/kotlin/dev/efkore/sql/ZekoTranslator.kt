@@ -1,6 +1,8 @@
 package dev.efkore.sql
 
 import dev.efkore.expressions.*
+import dev.efkore.metadata.EntityModel
+import kotlin.reflect.KMutableProperty1
 
 data class SqlAndParams(val sql: String, val params: List<Any?>)
 
@@ -146,6 +148,37 @@ class ZekoTranslator {
             "${columnName(expr.source)} LIKE ?"
         }
         else -> throw IllegalArgumentException("Unsupported expression in condition: $expr")
+    }
+
+    fun translateInsert(entity: Any, model: EntityModel<*>, params: MutableList<Any?>): String {
+        val insertCols = model.columns.filter { !it.isGenerated }
+        val colNames = insertCols.joinToString(", ") { "\"${it.columnName}\"" }
+        val placeholders = insertCols.joinToString(", ") { "?" }
+        insertCols.forEach { col ->
+            @Suppress("UNCHECKED_CAST")
+            (col.property as KMutableProperty1<Any, *>).get(entity).let { params.add(it) }
+        }
+        return "INSERT INTO \"${model.tableName}\" ($colNames) VALUES ($placeholders)"
+    }
+
+    fun translateUpdate(entity: Any, model: EntityModel<*>, params: MutableList<Any?>): String {
+        val setCols = model.columns.filter { !it.isKey }
+        val sets = setCols.joinToString(", ") { "\"${it.columnName}\" = ?" }
+        setCols.forEach { col ->
+            @Suppress("UNCHECKED_CAST")
+            (col.property as KMutableProperty1<Any, *>).get(entity).let { params.add(it) }
+        }
+        val keyCol = model.keyColumn
+        @Suppress("UNCHECKED_CAST")
+        (keyCol.property as KMutableProperty1<Any, *>).get(entity).let { params.add(it) }
+        return "UPDATE \"${model.tableName}\" SET $sets WHERE \"${keyCol.columnName}\" = ?"
+    }
+
+    fun translateDelete(entity: Any, model: EntityModel<*>, params: MutableList<Any?>): String {
+        val keyCol = model.keyColumn
+        @Suppress("UNCHECKED_CAST")
+        (keyCol.property as KMutableProperty1<Any, *>).get(entity).let { params.add(it) }
+        return "DELETE FROM \"${model.tableName}\" WHERE \"${keyCol.columnName}\" = ?"
     }
 
     private fun columnName(expr: Expression): String {

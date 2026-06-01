@@ -36,4 +36,22 @@ class R2dbcExecutor(
             conn.close().awaitFirstOrNull()
         }
     }
+
+    suspend fun executeUpdate(sql: String, params: List<Any?>): Int {
+        log.debug("UPDATE SQL: {} | params: {}", sql, params)
+        val conn = connectionFactory.create().awaitFirst()
+        return try {
+            val stmt = conn.createStatement(sql)
+            params.forEachIndexed { i, v ->
+                if (v != null) stmt.bind(i, v)
+                else stmt.bindNull(i, Any::class.java)
+            }
+            stmt.execute().asFlow()
+                .map { result -> result.rowsUpdated.asFlow().toList().sum().toInt() }
+                .toList()
+                .sum()
+        } finally {
+            conn.close().awaitFirstOrNull()
+        }
+    }
 }

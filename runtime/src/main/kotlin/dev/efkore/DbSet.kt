@@ -3,12 +3,14 @@ package dev.efkore
 import dev.efkore.expressions.*
 import dev.efkore.runtime.Materializer
 import dev.efkore.sql.ZekoTranslator
+import dev.efkore.tracking.ChangeTracker
 import kotlin.reflect.KClass
 
 class DbSet<T : Any>(
     internal val entityType: KClass<T>,
     internal val context: DbContext,
-    private val expression: Expression = QueryRootExpression(entityType)
+    private val expression: Expression = QueryRootExpression(entityType),
+    internal val changeTracker: ChangeTracker<T> = ChangeTracker(entityType)
 ) {
     private val translator = ZekoTranslator()
 
@@ -60,4 +62,13 @@ class DbSet<T : Any>(
 
     suspend fun first(): T? = toList().firstOrNull()
     suspend fun firstOrNull(): T? = toList().firstOrNull()
+
+    fun add(entity: T): T {
+        changeTracker.add(entity)
+        return entity
+    }
+
+    fun remove(entity: T) {
+        changeTracker.remove(entity)
+    }
 }

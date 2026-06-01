@@ -45,6 +45,8 @@ class ChangeTracker<T : Any>(
         }
     }
 
+    fun allEntries(): List<EntityEntry<T>> = entries.toList()
+
     fun takeSnapshot(entity: T): Map<String, Any?> {
         val map = mutableMapOf<String, Any?>()
         entityType.java.methods
