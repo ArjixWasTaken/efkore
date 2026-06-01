@@ -28,6 +28,17 @@ abstract class DbContext(
         return dbSet
     }
 
+    suspend fun <R> transaction(block: suspend () -> R): R =
+        executor.withConnection { conn ->
+            conn.beginTransaction.awaitFirstOrNull()
+            try {
+                block().also { conn.commitTransaction.awaitFirstOrNull() }
+            } catch (e: Exception) {
+                conn.rollbackTransaction.awaitFirstOrNull()
+                throw e
+            }
+        }
+
     suspend fun saveChanges(): Int {
         val translator = ZekoTranslator()
         var count = 0

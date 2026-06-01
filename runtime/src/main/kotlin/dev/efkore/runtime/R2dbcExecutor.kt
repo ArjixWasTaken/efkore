@@ -37,6 +37,15 @@ class R2dbcExecutor(
         }
     }
 
+    suspend fun <R> withConnection(block: suspend (io.r2dbc.spi.Connection) -> R): R {
+        val conn = connectionFactory.create().awaitFirst()
+        return try {
+            block(conn)
+        } finally {
+            conn.close().awaitFirstOrNull()
+        }
+    }
+
     suspend fun executeUpdate(sql: String, params: List<Any?>): Int {
         log.debug("UPDATE SQL: {} | params: {}", sql, params)
         val conn = connectionFactory.create().awaitFirst()
