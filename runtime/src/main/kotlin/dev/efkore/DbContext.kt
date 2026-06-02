@@ -2,13 +2,17 @@ package dev.efkore
 
 import dev.efkore.metadata.EntityModel
 import dev.efkore.runtime.R2dbcExecutor
+import dev.efkore.sql.SqlDialect
 import dev.efkore.sql.ZekoTranslator
 import dev.efkore.tracking.EntityState
 import io.r2dbc.spi.ConnectionFactory
 import kotlin.reflect.KClass
 
+data class DbContextOptions(val dialect: SqlDialect = SqlDialect.H2)
+
 abstract class DbContext(
-    private val connectionFactory: ConnectionFactory
+    private val connectionFactory: ConnectionFactory,
+    val options: DbContextOptions = DbContextOptions()
 ) {
     internal val models = mutableMapOf<KClass<*>, EntityModel<*>>()
     internal val executor = R2dbcExecutor(connectionFactory)
@@ -40,7 +44,7 @@ abstract class DbContext(
         }
 
     suspend fun saveChanges(): Int {
-        val translator = ZekoTranslator()
+        val translator = ZekoTranslator(options.dialect)
         var count = 0
         for (set in sets) {
             @Suppress("UNCHECKED_CAST")

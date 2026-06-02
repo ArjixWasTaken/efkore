@@ -16,6 +16,8 @@ private data class QueryChain(
     val distinct: Boolean
 )
 
+enum class SqlDialect { H2, POSTGRES }
+
 private fun unwrapChain(expr: Expression): QueryChain {
     var current = expr
     var filter: FilterExpression? = null
@@ -40,7 +42,12 @@ private fun unwrapChain(expr: Expression): QueryChain {
     return QueryChain(current, filter, project, orderBys, limit, offset, distinct)
 }
 
-class ZekoTranslator {
+class ZekoTranslator(private val dialect: SqlDialect = SqlDialect.H2) {
+
+    private fun paramMarker(index: Int): String = when (dialect) {
+        SqlDialect.H2 -> "?"
+        SqlDialect.POSTGRES -> "${'$'}$index"
+    }
 
     fun translate(root: Expression): SqlAndParams {
         return when (root) {
@@ -71,7 +78,7 @@ class ZekoTranslator {
         val table = tableName(expr.entityType)
         val wheres = expr.keyValues.entries.joinToString(" AND ") { (key, value) ->
             params.add(value)
-            "\"${key.lowercase()}\" = ?"
+            "\"${key.lowercase()}\" = ${paramMarker(params.size)}"
         }
         return SqlAndParams("SELECT * FROM \"$table\" WHERE $wheres", params)
     }
@@ -131,21 +138,21 @@ class ZekoTranslator {
                 "(${buildCondition(expr.left, params)} $op ${buildCondition(expr.right, params)})"
             } else {
                 params.add((expr.right as ConstantExpression).value)
-                "${columnName(expr.left)} $op ?"
+                "${columnName(expr.left)} $op ${paramMarker(params.size)}"
             }
         }
         is UnaryExpression -> "NOT (${buildCondition(expr.operand, params)})"
         is StartsWithExpression -> {
             params.add("${expr.value.value}%")
-            "${columnName(expr.source)} LIKE ?"
+            "${columnName(expr.source)} LIKE ${paramMarker(params.size)}"
         }
         is ContainsExpression -> {
             params.add("%${expr.value.value}%")
-            "${columnName(expr.source)} LIKE ?"
+            "${columnName(expr.source)} LIKE ${paramMarker(params.size)}"
         }
         is EndsWithExpression -> {
             params.add("%${expr.value.value}")
-            "${columnName(expr.source)} LIKE ?"
+            "${columnName(expr.source)} LIKE ${paramMarker(params.size)}"
         }
         else -> throw IllegalArgumentException("Unsupported expression in condition: $expr")
     }
@@ -153,7 +160,7 @@ class ZekoTranslator {
     fun translateInsert(entity: Any, model: EntityModel<*>, params: MutableList<Any?>): String {
         val insertCols = model.columns.filter { !it.isGenerated }
         val colNames = insertCols.joinToString(", ") { "\"${it.columnName}\"" }
-        val placeholders = insertCols.joinToString(", ") { "?" }
+        val placeholders = insertCols.indices.joinToString(", ") { i -> paramMarker(i + 1) }
         insertCols.forEach { col ->
             @Suppress("UNCHECKED_CAST")
             (col.property as KMutableProperty1<Any, *>).get(entity).let { params.add(it) }
@@ -163,7 +170,9 @@ class ZekoTranslator {
 
     fun translateUpdate(entity: Any, model: EntityModel<*>, params: MutableList<Any?>): String {
         val setCols = model.columns.filter { !it.isKey }
-        val sets = setCols.joinToString(", ") { "\"${it.columnName}\" = ?" }
+        val sets = setCols.indices.joinToString(", ") { i ->
+            "\"${setCols[i].columnName}\" = ${paramMarker(i + 1)}"
+        }
         setCols.forEach { col ->
             @Suppress("UNCHECKED_CAST")
             (col.property as KMutableProperty1<Any, *>).get(entity).let { params.add(it) }
@@ -171,14 +180,37 @@ class ZekoTranslator {
         val keyCol = model.keyColumn
         @Suppress("UNCHECKED_CAST")
         (keyCol.property as KMutableProperty1<Any, *>).get(entity).let { params.add(it) }
-        return "UPDATE \"${model.tableName}\" SET $sets WHERE \"${keyCol.columnName}\" = ?"
+        return "UPDATE \"${model.tableName}\" SET $sets WHERE \"${keyCol.columnName}\" = ${paramMarker(setCols.size + 1)}"
     }
 
     fun translateDelete(entity: Any, model: EntityModel<*>, params: MutableList<Any?>): String {
         val keyCol = model.keyColumn
         @Suppress("UNCHECKED_CAST")
         (keyCol.property as KMutableProperty1<Any, *>).get(entity).let { params.add(it) }
-        return "DELETE FROM \"${model.tableName}\" WHERE \"${keyCol.columnName}\" = ?"
+        return "DELETE FROM \"${model.tableName}\" WHERE \"${keyCol.columnName}\" = ${paramMarker(1)}"
+    }
+
+    fun translateDdl(model: EntityModel<*>): String {
+        val cols = model.columns.joinToString(",\n  ") { col ->
+            val type = when {
+                dialect == SqlDialect.POSTGRES && col.isGenerated -> when (col.property.returnType.classifier) {
+                    Int::class -> "SERIAL"
+                    Long::class -> "BIGSERIAL"
+                    else -> error("Unsupported generated type for POSTGRES")
+                }
+                else -> when (col.property.returnType.classifier) {
+                    Int::class -> if (col.isGenerated) "INT AUTO_INCREMENT" else "INT"
+                    Long::class -> if (col.isGenerated) "BIGINT AUTO_INCREMENT" else "BIGINT"
+                    String::class -> "VARCHAR(255)"
+                    Double::class -> "DOUBLE"
+                    Boolean::class -> "BOOLEAN"
+                    else -> "VARCHAR(255)"
+                }
+            }
+            val pk = if (col.isKey) " PRIMARY KEY" else ""
+            "\"${col.columnName}\" $type$pk"
+        }
+        return "CREATE TABLE IF NOT EXISTS \"${model.tableName}\" (\n  $cols\n)"
     }
 
     private fun columnName(expr: Expression): String {
