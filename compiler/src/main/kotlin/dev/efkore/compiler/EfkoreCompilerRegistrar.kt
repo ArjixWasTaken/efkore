@@ -15,7 +15,7 @@ class EfkoreCompilerRegistrar : CompilerPluginRegistrar() {
     override fun ExtensionStorage.registerExtensions(configuration: CompilerConfiguration) {
         IrGenerationExtension.registerExtension(object : IrGenerationExtension {
             override fun generate(moduleFragment: IrModuleFragment, pluginContext: IrPluginContext) {
-                moduleFragment.transform(EfkoreIrTransformer(), null)
+                moduleFragment.transform(EfkoreIrTransformer(pluginContext), null)
             }
         })
     }

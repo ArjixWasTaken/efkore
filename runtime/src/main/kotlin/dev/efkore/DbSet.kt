@@ -14,16 +14,31 @@ class DbSet<T : Any>(
 ) {
     private val translator = ZekoTranslator()
 
-    fun filter(predicate: LambdaExpression): DbSet<T> =
+    // Lambda overloads — plugin rewrites to *Expr calls; throw at runtime without plugin.
+    fun filter(predicate: (T) -> Boolean): DbSet<T> =
+        throw UnsupportedOperationException("Compile efkore with the compiler plugin")
+
+    fun <R : Any> map(selector: (T) -> R): DbSet<R> =
+        throw UnsupportedOperationException("Compile efkore with the compiler plugin")
+
+    fun sortedBy(keySelector: (T) -> Comparable<*>): DbSet<T> =
+        throw UnsupportedOperationException("Compile efkore with the compiler plugin")
+
+    fun sortedByDescending(keySelector: (T) -> Comparable<*>): DbSet<T> =
+        throw UnsupportedOperationException("Compile efkore with the compiler plugin")
+
+    // Expression overloads — the plugin rewrites lambda calls into these.
+    fun filterExpr(predicate: LambdaExpression): DbSet<T> =
         DbSet(entityType, context, FilterExpression(expression, predicate))
 
-    fun <R : Any> map(selector: LambdaExpression, resultType: KClass<R>): DbSet<R> =
+    @Suppress("UNCHECKED_CAST")
+    fun <R : Any> mapExpr(resultType: KClass<R>, selector: LambdaExpression): DbSet<R> =
         DbSet(resultType, context, ProjectExpression(expression, selector))
 
-    fun sortedBy(keySelector: LambdaExpression): DbSet<T> =
+    fun sortedByExpr(keySelector: LambdaExpression): DbSet<T> =
         DbSet(entityType, context, OrderByExpression(expression, keySelector, descending = false))
 
-    fun sortedByDescending(keySelector: LambdaExpression): DbSet<T> =
+    fun sortedByDescendingExpr(keySelector: LambdaExpression): DbSet<T> =
         DbSet(entityType, context, OrderByExpression(expression, keySelector, descending = true))
 
     fun skip(count: Int): DbSet<T> =
