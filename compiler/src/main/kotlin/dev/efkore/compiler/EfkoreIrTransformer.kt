@@ -47,6 +47,11 @@ class EfkoreIrTransformer(private val ctx: IrPluginContext) : IrElementTransform
     private val fnNot             get() = fn(EXPR_PKG, "not")
     private val fnParamExpr       get() = fn(EXPR_PKG, "paramExpr")
     private val fnLambdaExpr      get() = fn(EXPR_PKG, "lambdaExpr")
+    private val fnStringStartsWith get() = fn(EXPR_PKG, "stringStartsWith")
+    private val fnStringEndsWith   get() = fn(EXPR_PKG, "stringEndsWith")
+    private val fnStringContains   get() = fn(EXPR_PKG, "stringContains")
+    private val fnIsNullPred       get() = fn(EXPR_PKG, "isNullPred")
+    private val fnIsNotNullPred    get() = fn(EXPR_PKG, "isNotNullPred")
 
     private val dbSetClassId = ClassId(FqName("dev.efkore"), Name.identifier("DbSet"))
 
@@ -71,6 +76,14 @@ class EfkoreIrTransformer(private val ctx: IrPluginContext) : IrElementTransform
             "map"                -> rewriteMap(visited)
             "sortedBy"           -> rewriteSortedBy(visited, descending = false)
             "sortedByDescending" -> rewriteSortedBy(visited, descending = true)
+            "thenBy"             -> rewriteSortedBy(visited, descending = false, exprMethod = "thenByExpr")
+            "thenByDescending"   -> rewriteSortedBy(visited, descending = true, exprMethod = "thenByDescendingExpr")
+            "any"                -> rewriteFilterStyle(visited, "anyExpr")
+            "all"                -> rewriteFilterStyle(visited, "allExpr")
+            "sum"                -> rewriteAggregateStyle(visited, "sumExpr")
+            "avg"                -> rewriteAggregateStyle(visited, "avgExpr")
+            "min"                -> rewriteAggregateStyle(visited, "minExpr")
+            "max"                -> rewriteAggregateStyle(visited, "maxExpr")
             else                 -> visited
         }
     }
@@ -119,13 +132,45 @@ class EfkoreIrTransformer(private val ctx: IrPluginContext) : IrElementTransform
         return irCall(dbSetMethod(exprMethod), call.type, call.dispatchReceiver!!, lambdaIr)
     }
 
+    // any/all: same as filter but returns Boolean (not DbSet)
+    private fun rewriteFilterStyle(call: IrCall, exprMethod: String): IrExpression {
+        val lambda = extractLambda(call) ?: return call
+        val param = lambdaParam(lambda)
+        val body = extractBody(lambda) ?: return call
+        val predicateIr = try { buildExpr(body, param) }
+        catch (e: UnsupportedQueryExpression) { return call }
+        val lambdaIr = buildLambdaExprIr(param, predicateIr)
+        return irCall(dbSetMethod(exprMethod), call.type, call.dispatchReceiver!!, lambdaIr)
+    }
+
+    // sum/avg/min/max: pass KClass + lambda to *Expr
+    private fun rewriteAggregateStyle(call: IrCall, exprMethod: String): IrExpression {
+        val lambda = extractLambda(call) ?: return call
+        val param = lambdaParam(lambda)
+        val body = extractBody(lambda) ?: return call
+        val selectorIr = try { buildSinglePropExpr(body, param) }
+        catch (e: UnsupportedQueryExpression) { return call }
+        val lambdaIr = buildLambdaExprIr(param, selectorIr)
+        val kClassIr = buildKClassRef(lambda.function.returnType)
+
+        return irCallImpl(call.startOffset, call.endOffset, call.type, dbSetMethod(exprMethod)).also {
+            it.arguments.add(call.dispatchReceiver!!)
+            @Suppress("UNCHECKED_CAST")
+            (it.typeArguments as MutableList<IrType?>).add(lambda.function.returnType)
+            it.arguments.add(kClassIr)
+            it.arguments.add(lambdaIr)
+        }
+    }
+
     // ─── expression tree builder ──────────────────────────────────────────────
 
     private fun buildExpr(ir: IrExpression, param: IrValueParameter): IrExpression = when {
         ir is IrCall && ir.isPropertyGetterOn(param) -> buildPropertyRef(ir)
         ir is IrConst                             -> buildConstantCall(ir)
         ir is IrGetValue && ir.symbol != param.symbol -> buildCapturedConstant(ir)
+        ir is IrCall && isStringMethodCall(ir, param) -> buildStringMethodIr(ir, param)
         ir is IrCall                                  -> buildBinaryOrBool(ir, param)
+        ir is IrWhen                                  -> buildFromWhen(ir, param)
         else -> throw UnsupportedQueryExpression("Unsupported expression: ${ir.render()}")
     }
 
@@ -142,8 +187,26 @@ class EfkoreIrTransformer(private val ctx: IrPluginContext) : IrElementTransform
             IrStatementOrigin.GTEQ   -> buildBinary(fnGe, call, param)
             IrStatementOrigin.LT     -> buildBinary(fnLt, call, param)
             IrStatementOrigin.LTEQ   -> buildBinary(fnLe, call, param)
-            IrStatementOrigin.EQEQ   -> buildBinary(fnEq, call, param)
-            IrStatementOrigin.EXCLEQ -> buildBinary(fnNe, call, param)
+            IrStatementOrigin.EQEQ   -> {
+                val (rawLhs, rawRhs) = rawBinaryArgs(call)
+                when {
+                    rawRhs is IrConst && rawRhs.value == null ->
+                        buildNullCheckIr(buildExpr(rawLhs, param), isNotNull = false)
+                    rawLhs is IrConst && rawLhs.value == null ->
+                        buildNullCheckIr(buildExpr(rawRhs, param), isNotNull = false)
+                    else -> buildBinary(fnEq, call, param)
+                }
+            }
+            IrStatementOrigin.EXCLEQ -> {
+                val (rawLhs, rawRhs) = rawBinaryArgs(call)
+                when {
+                    rawRhs is IrConst && rawRhs.value == null ->
+                        buildNullCheckIr(buildExpr(rawLhs, param), isNotNull = true)
+                    rawLhs is IrConst && rawLhs.value == null ->
+                        buildNullCheckIr(buildExpr(rawRhs, param), isNotNull = true)
+                    else -> buildBinary(fnNe, call, param)
+                }
+            }
             IrStatementOrigin.ANDAND -> buildBinary(fnAnd, call, param)
             IrStatementOrigin.OROR   -> buildBinary(fnOr, call, param)
             IrStatementOrigin.EXCL   -> buildUnary(call, param)
@@ -180,6 +243,55 @@ class EfkoreIrTransformer(private val ctx: IrPluginContext) : IrElementTransform
             it.arguments.add(operand)
         }
     }
+
+    private fun isStringMethodCall(call: IrCall, param: IrValueParameter): Boolean {
+        val name = call.symbol.owner.name.asString()
+        if (name !in listOf("startsWith", "endsWith", "contains")) return false
+        val recv = call.dispatchReceiver ?: call.extensionReceiver ?: return false
+        return recv is IrCall && recv.isPropertyGetterOn(param)
+    }
+
+    private fun buildStringMethodIr(call: IrCall, param: IrValueParameter): IrExpression {
+        val name = call.symbol.owner.name.asString()
+        val builderFn = when (name) {
+            "startsWith" -> fnStringStartsWith
+            "endsWith"   -> fnStringEndsWith
+            "contains"   -> fnStringContains
+            else -> throw UnsupportedQueryExpression("Unknown string method: $name")
+        }
+        val recv = (call.dispatchReceiver ?: call.extensionReceiver) as IrCall
+        val propIr = buildPropertyRef(recv)
+        val rawArg = call.getValueArgument(0)
+            ?: throw UnsupportedQueryExpression("String predicate has no argument")
+        if (rawArg !is IrConst) throw UnsupportedQueryExpression("String predicate requires a literal argument")
+        val argIr = buildConstantCall(rawArg)
+        return irBuilderCall(builderFn, propIr, argIr)
+    }
+
+    private fun buildNullCheckIr(propIr: IrExpression, isNotNull: Boolean): IrExpression {
+        val fn = if (isNotNull) fnIsNotNullPred else fnIsNullPred
+        return irCallImpl(SYNTHETIC_OFFSET, SYNTHETIC_OFFSET, expressionType, fn).also {
+            it.arguments.add(propIr)
+        }
+    }
+
+    private fun buildFromWhen(when_: IrWhen, param: IrValueParameter): IrExpression {
+        val branches = when_.branches
+        if (branches.size == 2 && branches[1] is IrElseBranch) {
+            val condition = branches[0].condition
+            val thenResult = branches[0].result
+            val elseResult = (branches[1] as IrElseBranch).result
+            return when {
+                isConstBool(elseResult, false) -> irBuilderCall(fnAnd, buildExpr(condition, param), buildExpr(thenResult, param))
+                isConstBool(thenResult, true)  -> irBuilderCall(fnOr, buildExpr(condition, param), buildExpr(elseResult, param))
+                else -> throw UnsupportedQueryExpression("Unsupported IrWhen pattern in query lambda")
+            }
+        }
+        throw UnsupportedQueryExpression("Unsupported IrWhen in query lambda")
+    }
+
+    private fun isConstBool(ir: IrExpression, value: Boolean) =
+        ir is IrConst && ir.kind == IrConstKind.Boolean && ir.value == value
 
     // ─── IR builder helpers ───────────────────────────────────────────────────
 

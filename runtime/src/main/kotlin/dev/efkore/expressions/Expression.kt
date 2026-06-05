@@ -32,3 +32,8 @@ data class ContainsExpression(val source: Expression, val value: ConstantExpress
 data class EndsWithExpression(val source: Expression, val value: ConstantExpression) : Expression()
 data class ThenByExpression(val source: Expression, val keySelector: LambdaExpression, val descending: Boolean) : Expression()
 data class FindExpression(val entityType: KClass<*>, val keyValues: Map<String, Any?>) : Expression()
+
+data class AnyExpression(val source: Expression, val predicate: LambdaExpression) : Expression()
+data class AllExpression(val source: Expression, val predicate: LambdaExpression) : Expression()
+data class IsNullExpression(val property: Expression) : Expression()
+data class IsNotNullExpression(val property: Expression) : Expression()

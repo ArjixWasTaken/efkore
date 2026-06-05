@@ -29,3 +29,9 @@ fun contains(source: Expression, value: ConstantExpression) = ContainsExpression
 fun endsWith(source: Expression, value: ConstantExpression) = EndsWithExpression(source, value)
 fun thenBy(source: Expression, selector: LambdaExpression, descending: Boolean = false) = ThenByExpression(source, selector, descending)
 fun find(entityType: KClass<*>, keyValues: Map<String, Any?>) = FindExpression(entityType, keyValues)
+
+fun stringStartsWith(target: Expression, arg: ConstantExpression) = StartsWithExpression(target, arg)
+fun stringEndsWith(target: Expression, arg: ConstantExpression) = EndsWithExpression(target, arg)
+fun stringContains(target: Expression, arg: ConstantExpression) = ContainsExpression(target, arg)
+fun isNullPred(property: Expression) = IsNullExpression(property)
+fun isNotNullPred(property: Expression) = IsNotNullExpression(property)

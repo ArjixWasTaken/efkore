@@ -27,6 +27,30 @@ class DbSet<T : Any>(
     fun sortedByDescending(keySelector: (T) -> Comparable<*>): DbSet<T> =
         throw UnsupportedOperationException("Compile efkore with the compiler plugin")
 
+    fun thenBy(keySelector: (T) -> Comparable<*>): DbSet<T> =
+        throw UnsupportedOperationException("Compile efkore with the compiler plugin")
+
+    fun thenByDescending(keySelector: (T) -> Comparable<*>): DbSet<T> =
+        throw UnsupportedOperationException("Compile efkore with the compiler plugin")
+
+    suspend fun any(predicate: (T) -> Boolean): Boolean =
+        throw UnsupportedOperationException("Compile efkore with the compiler plugin")
+
+    suspend fun all(predicate: (T) -> Boolean): Boolean =
+        throw UnsupportedOperationException("Compile efkore with the compiler plugin")
+
+    suspend fun <R : Any> sum(selector: (T) -> R): R =
+        throw UnsupportedOperationException("Compile efkore with the compiler plugin")
+
+    suspend fun <R : Any> avg(selector: (T) -> R): R =
+        throw UnsupportedOperationException("Compile efkore with the compiler plugin")
+
+    suspend fun <R : Any> min(selector: (T) -> R): R =
+        throw UnsupportedOperationException("Compile efkore with the compiler plugin")
+
+    suspend fun <R : Any> max(selector: (T) -> R): R =
+        throw UnsupportedOperationException("Compile efkore with the compiler plugin")
+
     // Expression overloads — the plugin rewrites lambda calls into these.
     fun filterExpr(predicate: LambdaExpression): DbSet<T> =
         DbSet(entityType, context, FilterExpression(expression, predicate))
@@ -40,6 +64,30 @@ class DbSet<T : Any>(
 
     fun sortedByDescendingExpr(keySelector: LambdaExpression): DbSet<T> =
         DbSet(entityType, context, OrderByExpression(expression, keySelector, descending = true))
+
+    fun thenByExpr(keySelector: LambdaExpression): DbSet<T> =
+        DbSet(entityType, context, ThenByExpression(expression, keySelector, descending = false))
+
+    fun thenByDescendingExpr(keySelector: LambdaExpression): DbSet<T> =
+        DbSet(entityType, context, ThenByExpression(expression, keySelector, descending = true))
+
+    suspend fun anyExpr(predicate: LambdaExpression): Boolean =
+        throw UnsupportedOperationException("Compile efkore with the compiler plugin")
+
+    suspend fun allExpr(predicate: LambdaExpression): Boolean =
+        throw UnsupportedOperationException("Compile efkore with the compiler plugin")
+
+    suspend fun <R : Any> sumExpr(resultType: KClass<R>, selector: LambdaExpression): R =
+        throw UnsupportedOperationException("Compile efkore with the compiler plugin")
+
+    suspend fun <R : Any> avgExpr(resultType: KClass<R>, selector: LambdaExpression): R =
+        throw UnsupportedOperationException("Compile efkore with the compiler plugin")
+
+    suspend fun <R : Any> minExpr(resultType: KClass<R>, selector: LambdaExpression): R =
+        throw UnsupportedOperationException("Compile efkore with the compiler plugin")
+
+    suspend fun <R : Any> maxExpr(resultType: KClass<R>, selector: LambdaExpression): R =
+        throw UnsupportedOperationException("Compile efkore with the compiler plugin")
 
     fun skip(count: Int): DbSet<T> =
         DbSet(entityType, context, OffsetExpression(expression, count))
