@@ -2,7 +2,9 @@
 kotlin = "2.3.0"
 kotlinx-coroutines = "1.10.1"
 r2dbc-spi = "1.0.0.RELEASE"
+r2dbc-h2 = "1.0.0.RELEASE"
 slf4j = "2.0.16"
+junit-jupiter = "5.11.4"
 
 [libraries]
 kotlin-compiler-embeddable    = { module = "org.jetbrains.kotlin:kotlin-compiler-embeddable",   version.ref = "kotlin" }
@@ -12,6 +14,10 @@ kotlinx-coroutines-reactive = { module = "org.jetbrains.kotlinx:kotlinx-coroutin
 kotlin-reflect              = { module = "org.jetbrains.kotlin:kotlin-reflect",               version.ref = "kotlin" }
 r2dbc-spi                   = { module = "io.r2dbc:r2dbc-spi",                                version.ref = "r2dbc-spi" }
 slf4j-api                   = { module = "org.slf4j:slf4j-api",                               version.ref = "slf4j" }
+slf4j-simple                = { module = "org.slf4j:slf4j-simple",                            version.ref = "slf4j" }
+junit-jupiter               = { module = "org.junit.jupiter:junit-jupiter",                   version.ref = "junit-jupiter" }
+kotlinx-coroutines-test     = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test",     version.ref = "kotlinx-coroutines" }
+r2dbc-h2                    = { module = "io.r2dbc:r2dbc-h2",                                 version.ref = "r2dbc-h2" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
