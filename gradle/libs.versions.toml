@@ -5,6 +5,7 @@ r2dbc-spi = "1.0.0.RELEASE"
 r2dbc-h2 = "1.0.0.RELEASE"
 slf4j = "2.0.16"
 junit-jupiter = "5.11.4"
+kctfork = "0.12.1"
 
 [libraries]
 kotlin-compiler-embeddable    = { module = "org.jetbrains.kotlin:kotlin-compiler-embeddable",   version.ref = "kotlin" }
@@ -18,6 +19,7 @@ slf4j-simple                = { module = "org.slf4j:slf4j-simple",              
 junit-jupiter               = { module = "org.junit.jupiter:junit-jupiter",                   version.ref = "junit-jupiter" }
 kotlinx-coroutines-test     = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test",     version.ref = "kotlinx-coroutines" }
 r2dbc-h2                    = { module = "io.r2dbc:r2dbc-h2",                                 version.ref = "r2dbc-h2" }
+kctfork-core                = { module = "dev.zacsweers.kctfork:core",                          version.ref = "kctfork" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
