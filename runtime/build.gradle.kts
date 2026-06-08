@@ -13,6 +13,12 @@ dependencies {
     api(libs.r2dbc.spi)
     api(libs.kotlin.reflect)
     implementation(libs.slf4j.api)
+    testImplementation(libs.junit.jupiter)
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 java {

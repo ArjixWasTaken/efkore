@@ -6,6 +6,7 @@ import dev.efkore.sql.SqlDialect
 import dev.efkore.sql.ZekoTranslator
 import dev.efkore.tracking.EntityState
 import io.r2dbc.spi.ConnectionFactory
+import kotlinx.coroutines.reactive.awaitFirstOrNull
 import kotlin.reflect.KClass
 
 data class DbContextOptions(val dialect: SqlDialect = SqlDialect.H2)
@@ -34,11 +35,11 @@ abstract class DbContext(
 
     suspend fun <R> transaction(block: suspend () -> R): R =
         executor.withConnection { conn ->
-            conn.beginTransaction.awaitFirstOrNull()
+            conn.beginTransaction().awaitFirstOrNull()
             try {
-                block().also { conn.commitTransaction.awaitFirstOrNull() }
+                block().also { conn.commitTransaction().awaitFirstOrNull() }
             } catch (e: Exception) {
-                conn.rollbackTransaction.awaitFirstOrNull()
+                conn.rollbackTransaction().awaitFirstOrNull()
                 throw e
             }
         }
