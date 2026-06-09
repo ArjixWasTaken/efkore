@@ -2,9 +2,12 @@ package dev.efkore.sql
 
 import dev.efkore.expressions.*
 import dev.efkore.metadata.EntityModel
-import kotlin.reflect.KMutableProperty1
+import io.zeko.db.sql.ANSIQuery
+import java.util.concurrent.atomic.AtomicInteger
 
-data class SqlAndParams(val sql: String, val params: List<Any?>)
+data class BoundSql(val sql: String, val params: List<Any?>)
+
+enum class SqlDialect { H2, POSTGRES }
 
 private data class QueryChain(
     val root: QueryRootExpression,
@@ -15,8 +18,6 @@ private data class QueryChain(
     val offset: Int?,
     val distinct: Boolean
 )
-
-enum class SqlDialect { H2, POSTGRES }
 
 private fun unwrapChain(expr: Expression): QueryChain {
     var current = expr
@@ -29,196 +30,134 @@ private fun unwrapChain(expr: Expression): QueryChain {
 
     while (current !is QueryRootExpression) {
         when (current) {
-            is FilterExpression -> { filter = current; current = current.source }
-            is ProjectExpression -> { project = current; current = current.source }
-            is OrderByExpression -> { orderBys.add(0, current.keySelector to current.descending); current = current.source }
-            is ThenByExpression -> { orderBys.add(0, current.keySelector to current.descending); current = current.source }
-            is LimitExpression -> { limit = current.count; current = current.source }
-            is OffsetExpression -> { offset = current.count; current = current.source }
+            is FilterExpression   -> { filter = current; current = current.source }
+            is ProjectExpression  -> { project = current; current = current.source }
+            is OrderByExpression  -> { orderBys.add(0, current.keySelector to current.descending); current = current.source }
+            is ThenByExpression   -> { orderBys.add(0, current.keySelector to current.descending); current = current.source }
+            is LimitExpression    -> { limit = current.count; current = current.source }
+            is OffsetExpression   -> { offset = current.count; current = current.source }
             is DistinctExpression -> { distinct = true; current = current.source }
             else -> throw IllegalArgumentException("Unexpected expression in query chain: $current")
         }
     }
-    return QueryChain(current, filter, project, orderBys, limit, offset, distinct)
+    return QueryChain(current as QueryRootExpression, filter, project, orderBys, limit, offset, distinct)
 }
 
 class ZekoTranslator(private val dialect: SqlDialect = SqlDialect.H2) {
 
     private fun paramMarker(index: Int): String = when (dialect) {
-        SqlDialect.H2 -> "?"
-        SqlDialect.POSTGRES -> "${'$'}$index"
+        SqlDialect.H2       -> "?"
+        SqlDialect.POSTGRES -> "\$$index"
     }
 
-    fun translate(root: Expression): SqlAndParams {
-        return when (root) {
-            is CountExpression -> translateAgg("COUNT(*)", root.source)
-            is SumExpression -> translateAgg("SUM(${columnName(root.selector.body)})", root.source)
-            is AvgExpression -> translateAgg("AVG(${columnName(root.selector.body)})", root.source)
-            is MinExpression -> translateAgg("MIN(${columnName(root.selector.body)})", root.source)
-            is MaxExpression -> translateAgg("MAX(${columnName(root.selector.body)})", root.source)
-            is FindExpression -> translateFind(root)
-            else -> translateChain(root)
-        }
+    fun translate(expr: Expression, model: EntityModel<*>): BoundSql = when (expr) {
+        is AggregateExpression -> translateAggregate(expr, model)
+        is AnyExpression       -> translateExists(expr.source, expr.predicate, negated = false, model)
+        is AllExpression       -> translateExists(expr.source, expr.predicate, negated = true, model)
+        else                   -> translateSelect(expr, model)
     }
 
-    private fun translateAgg(aggExpr: String, source: Expression): SqlAndParams {
+    private fun translateSelect(expr: Expression, model: EntityModel<*>): BoundSql {
+        val chain = unwrapChain(expr)
         val params = mutableListOf<Any?>()
-        val chain = unwrapChain(source)
-        val table = tableName(chain.root.entityType)
-        val sb = StringBuilder("SELECT $aggExpr FROM \"$table\"")
-        chain.filter?.let {
-            sb.append(" WHERE ")
-            sb.append(buildCondition(it.predicate.body, params))
-        }
-        return SqlAndParams(sb.toString(), params)
-    }
+        val idx = AtomicInteger(0)
 
-    private fun translateFind(expr: FindExpression): SqlAndParams {
-        val params = mutableListOf<Any?>()
-        val table = tableName(expr.entityType)
-        val wheres = expr.keyValues.entries.joinToString(" AND ") { (key, value) ->
-            params.add(value)
-            "\"${key.lowercase()}\" = ${paramMarker(params.size)}"
-        }
-        return SqlAndParams("SELECT * FROM \"$table\" WHERE $wheres", params)
-    }
-
-    private fun translateChain(root: Expression): SqlAndParams {
-        val chain = unwrapChain(root)
-        val params = mutableListOf<Any?>()
-        val table = tableName(chain.root.entityType)
-
-        val select = if (chain.project != null) {
-            columnName(chain.project.selector.body)
+        val selectFields = if (chain.project != null) {
+            arrayOf(q(colName(chain.project.selector.body, model)))
         } else {
-            "*"
+            model.columns.map { q(it.columnName) }.toTypedArray()
         }
 
-        val distinct = if (chain.distinct) "DISTINCT " else ""
-
-        val sb = StringBuilder()
-        sb.append("SELECT ${distinct}$select FROM \"$table\"")
-
-        chain.filter?.let {
-            sb.append(" WHERE ")
-            sb.append(buildCondition(it.predicate.body, params))
+        var query = ANSIQuery().fields(*selectFields).from(model.tableName)
+        chain.filter?.let { query = query.where(buildCond(it.predicate.body, model, params, idx)) }
+        chain.orderBys.forEach { (sel, desc) ->
+            val col = q(colName(sel.body, model))
+            query = if (desc) query.orderDesc(col) else query.order(col)
+        }
+        if (chain.limit != null || chain.offset != null) {
+            query = query.limit(chain.limit ?: Int.MAX_VALUE, chain.offset ?: 0)
         }
 
-        if (chain.orderBys.isNotEmpty()) {
-            sb.append(" ORDER BY ")
-            sb.append(chain.orderBys.joinToString(", ") { (sel, desc) ->
-                val col = columnName(sel.body)
-                if (desc) "$col DESC" else col
-            })
-        }
-
-        if (chain.limit != null) {
-            sb.append(" LIMIT ${chain.limit}")
-        }
-        if (chain.offset != null) {
-            sb.append(" OFFSET ${chain.offset}")
-        }
-
-        return SqlAndParams(sb.toString(), params)
+        var sql = query.toSql()
+        if (chain.distinct) sql = sql.replaceFirst("SELECT ", "SELECT DISTINCT ")
+        return BoundSql(sql, params)
     }
 
-    private fun buildCondition(expr: Expression, params: MutableList<Any?>): String = when (expr) {
+    private fun translateAggregate(expr: AggregateExpression, model: EntityModel<*>): BoundSql {
+        val chain = unwrapChain(expr.source)
+        val params = mutableListOf<Any?>()
+        val idx = AtomicInteger(0)
+        val aggField = when (expr.op) {
+            AggregateOp.COUNT -> "COUNT(*)"
+            AggregateOp.SUM   -> "SUM(${q(colName(expr.selector!!.body, model))})"
+            AggregateOp.MIN   -> "MIN(${q(colName(expr.selector!!.body, model))})"
+            AggregateOp.MAX   -> "MAX(${q(colName(expr.selector!!.body, model))})"
+            AggregateOp.AVG   -> "AVG(${q(colName(expr.selector!!.body, model))})"
+        }
+        var query = ANSIQuery().fields(aggField).from(model.tableName)
+        chain.filter?.let { query = query.where(buildCond(it.predicate.body, model, params, idx)) }
+        return BoundSql(query.toSql(), params)
+    }
+
+    private fun translateExists(
+        source: Expression,
+        predicate: LambdaExpression,
+        negated: Boolean,
+        model: EntityModel<*>
+    ): BoundSql {
+        val params = mutableListOf<Any?>()
+        val idx = AtomicInteger(0)
+        var cond = buildCond(predicate.body, model, params, idx)
+        if (negated) cond = "NOT ($cond)"
+        val sql = ANSIQuery().fields("1").from(model.tableName).where(cond).limit(1).toSql()
+        return BoundSql(sql, params)
+    }
+
+    private fun buildCond(
+        expr: Expression,
+        model: EntityModel<*>,
+        params: MutableList<Any?>,
+        idx: AtomicInteger
+    ): String = when (expr) {
         is BinaryExpression -> {
             val op = when (expr.op) {
                 BinaryOp.AND -> "AND"
-                BinaryOp.OR -> "OR"
-                BinaryOp.GT -> ">"
-                BinaryOp.GE -> ">="
-                BinaryOp.LT -> "<"
-                BinaryOp.LE -> "<="
-                BinaryOp.EQ -> "="
-                BinaryOp.NE -> "<>"
+                BinaryOp.OR  -> "OR"
+                BinaryOp.GT  -> ">"
+                BinaryOp.GE  -> ">="
+                BinaryOp.LT  -> "<"
+                BinaryOp.LE  -> "<="
+                BinaryOp.EQ  -> "="
+                BinaryOp.NE  -> "<>"
             }
             if (expr.op == BinaryOp.AND || expr.op == BinaryOp.OR) {
-                "(${buildCondition(expr.left, params)} $op ${buildCondition(expr.right, params)})"
+                "(${buildCond(expr.left, model, params, idx)} $op ${buildCond(expr.right, model, params, idx)})"
             } else {
                 params.add((expr.right as ConstantExpression).value)
-                "${columnName(expr.left)} $op ${paramMarker(params.size)}"
+                "${q(colName(expr.left, model))} $op ${paramMarker(idx.incrementAndGet())}"
             }
         }
-        is UnaryExpression -> "NOT (${buildCondition(expr.operand, params)})"
-        is StartsWithExpression -> {
-            params.add("${expr.value.value}%")
-            "${columnName(expr.source)} LIKE ${paramMarker(params.size)}"
-        }
-        is ContainsExpression -> {
-            params.add("%${expr.value.value}%")
-            "${columnName(expr.source)} LIKE ${paramMarker(params.size)}"
-        }
-        is EndsWithExpression -> {
-            params.add("%${expr.value.value}")
-            "${columnName(expr.source)} LIKE ${paramMarker(params.size)}"
-        }
-        else -> throw IllegalArgumentException("Unsupported expression in condition: $expr")
-    }
-
-    fun translateInsert(entity: Any, model: EntityModel<*>, params: MutableList<Any?>): String {
-        val insertCols = model.columns.filter { !it.isGenerated }
-        val colNames = insertCols.joinToString(", ") { "\"${it.columnName}\"" }
-        val placeholders = insertCols.indices.joinToString(", ") { i -> paramMarker(i + 1) }
-        insertCols.forEach { col ->
-            @Suppress("UNCHECKED_CAST")
-            (col.property as KMutableProperty1<Any, *>).get(entity).let { params.add(it) }
-        }
-        return "INSERT INTO \"${model.tableName}\" ($colNames) VALUES ($placeholders)"
-    }
-
-    fun translateUpdate(entity: Any, model: EntityModel<*>, params: MutableList<Any?>): String {
-        val setCols = model.columns.filter { !it.isKey }
-        val sets = setCols.indices.joinToString(", ") { i ->
-            "\"${setCols[i].columnName}\" = ${paramMarker(i + 1)}"
-        }
-        setCols.forEach { col ->
-            @Suppress("UNCHECKED_CAST")
-            (col.property as KMutableProperty1<Any, *>).get(entity).let { params.add(it) }
-        }
-        val keyCol = model.keyColumn
-        @Suppress("UNCHECKED_CAST")
-        (keyCol.property as KMutableProperty1<Any, *>).get(entity).let { params.add(it) }
-        return "UPDATE \"${model.tableName}\" SET $sets WHERE \"${keyCol.columnName}\" = ${paramMarker(setCols.size + 1)}"
-    }
-
-    fun translateDelete(entity: Any, model: EntityModel<*>, params: MutableList<Any?>): String {
-        val keyCol = model.keyColumn
-        @Suppress("UNCHECKED_CAST")
-        (keyCol.property as KMutableProperty1<Any, *>).get(entity).let { params.add(it) }
-        return "DELETE FROM \"${model.tableName}\" WHERE \"${keyCol.columnName}\" = ${paramMarker(1)}"
-    }
-
-    fun translateDdl(model: EntityModel<*>): String {
-        val cols = model.columns.joinToString(",\n  ") { col ->
-            val type = when {
-                dialect == SqlDialect.POSTGRES && col.isGenerated -> when (col.property.returnType.classifier) {
-                    Int::class -> "SERIAL"
-                    Long::class -> "BIGSERIAL"
-                    else -> error("Unsupported generated type for POSTGRES")
-                }
-                else -> when (col.property.returnType.classifier) {
-                    Int::class -> if (col.isGenerated) "INT AUTO_INCREMENT" else "INT"
-                    Long::class -> if (col.isGenerated) "BIGINT AUTO_INCREMENT" else "BIGINT"
-                    String::class -> "VARCHAR(255)"
-                    Double::class -> "DOUBLE"
-                    Boolean::class -> "BOOLEAN"
-                    else -> "VARCHAR(255)"
-                }
+        is StringCallExpression -> {
+            val col = q(colName(expr.target, model))
+            val raw = expr.arg.value as String
+            val pattern = when (expr.op) {
+                StringOp.STARTS_WITH -> "$raw%"
+                StringOp.ENDS_WITH   -> "%$raw"
+                StringOp.CONTAINS    -> "%$raw%"
             }
-            val pk = if (col.isKey) " PRIMARY KEY" else ""
-            "\"${col.columnName}\" $type$pk"
+            params.add(pattern)
+            "$col LIKE ${paramMarker(idx.incrementAndGet())}"
         }
-        return "CREATE TABLE IF NOT EXISTS \"${model.tableName}\" (\n  $cols\n)"
+        is IsNullExpression    -> "${q(colName(expr.property, model))} IS NULL"
+        is IsNotNullExpression -> "${q(colName(expr.property, model))} IS NOT NULL"
+        is UnaryExpression     -> "NOT (${buildCond(expr.operand, model, params, idx)})"
+        else -> throw IllegalArgumentException("Cannot convert $expr to SQL condition")
     }
 
-    private fun columnName(expr: Expression): String {
+    private fun colName(expr: Expression, model: EntityModel<*>): String {
         require(expr is PropertyExpression) { "Expected PropertyExpression, got $expr" }
-        return "\"${expr.property.name.lowercase()}\""
+        return model.columns.first { it.property == expr.property }.columnName
     }
 
-    private fun tableName(entityType: kotlin.reflect.KClass<*>): String {
-        return entityType.simpleName?.lowercase() + "s"
-    }
+    private fun q(name: String) = "\"$name\""
 }

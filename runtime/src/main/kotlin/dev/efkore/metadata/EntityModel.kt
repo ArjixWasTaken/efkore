@@ -50,8 +50,4 @@ class EntityModel<T : Any>(val entityClass: KClass<T>) {
         }
         return "CREATE TABLE IF NOT EXISTS \"${tableName}\" (\n  $cols\n)"
     }
-
-    companion object {
-        inline fun <reified T : Any> resolve(): EntityModel<T> = EntityModel(T::class)
-    }
 }

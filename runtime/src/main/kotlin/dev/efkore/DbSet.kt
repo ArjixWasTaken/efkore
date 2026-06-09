@@ -1,20 +1,14 @@
 package dev.efkore
 
 import dev.efkore.expressions.*
-import dev.efkore.runtime.Materializer
-import dev.efkore.sql.ZekoTranslator
-import dev.efkore.tracking.ChangeTracker
 import kotlin.reflect.KClass
+import kotlin.reflect.KMutableProperty1
 
 class DbSet<T : Any>(
     internal val entityType: KClass<T>,
     internal val context: DbContext,
-    private val expression: Expression = QueryRootExpression(entityType),
-    internal val changeTracker: ChangeTracker<T> = ChangeTracker(entityType)
+    internal val expression: Expression = QueryRootExpression(entityType)
 ) {
-    private val translator = ZekoTranslator()
-    private val cache = mutableMapOf<List<Any?>, T?>()
-
     // Lambda overloads — plugin rewrites to *Expr calls; throw at runtime without plugin.
     fun filter(predicate: (T) -> Boolean): DbSet<T> =
         throw UnsupportedOperationException("Compile efkore with the compiler plugin")
@@ -40,16 +34,16 @@ class DbSet<T : Any>(
     suspend fun all(predicate: (T) -> Boolean): Boolean =
         throw UnsupportedOperationException("Compile efkore with the compiler plugin")
 
-    suspend fun <R : Any> sum(selector: (T) -> R): R =
+    suspend fun <R : Any> sumOf(selector: (T) -> R): R =
         throw UnsupportedOperationException("Compile efkore with the compiler plugin")
 
-    suspend fun <R : Any> avg(selector: (T) -> R): R =
+    suspend fun <R : Any> minOf(selector: (T) -> R): R =
         throw UnsupportedOperationException("Compile efkore with the compiler plugin")
 
-    suspend fun <R : Any> min(selector: (T) -> R): R =
+    suspend fun <R : Any> maxOf(selector: (T) -> R): R =
         throw UnsupportedOperationException("Compile efkore with the compiler plugin")
 
-    suspend fun <R : Any> max(selector: (T) -> R): R =
+    suspend fun <R : Any> averageOf(selector: (T) -> R): R =
         throw UnsupportedOperationException("Compile efkore with the compiler plugin")
 
     // Expression overloads — the plugin rewrites lambda calls into these.
@@ -73,84 +67,87 @@ class DbSet<T : Any>(
         DbSet(entityType, context, ThenByExpression(expression, keySelector, descending = true))
 
     suspend fun anyExpr(predicate: LambdaExpression): Boolean =
-        throw UnsupportedOperationException("Compile efkore with the compiler plugin")
+        context.executor.executeExists(AnyExpression(expression, predicate), context.model(rootEntityType(expression)))
 
     suspend fun allExpr(predicate: LambdaExpression): Boolean =
-        throw UnsupportedOperationException("Compile efkore with the compiler plugin")
+        context.executor.executeExists(AllExpression(expression, predicate), context.model(rootEntityType(expression)))
 
-    suspend fun <R : Any> sumExpr(resultType: KClass<R>, selector: LambdaExpression): R =
-        throw UnsupportedOperationException("Compile efkore with the compiler plugin")
+    suspend fun <R : Any> sumOfExpr(resultType: KClass<R>, selector: LambdaExpression): R =
+        context.executor.executeScalar(AggregateExpression(AggregateOp.SUM, expression, selector), resultType, context.model(rootEntityType(expression)))
 
-    suspend fun <R : Any> avgExpr(resultType: KClass<R>, selector: LambdaExpression): R =
-        throw UnsupportedOperationException("Compile efkore with the compiler plugin")
+    suspend fun <R : Any> minOfExpr(resultType: KClass<R>, selector: LambdaExpression): R =
+        context.executor.executeScalar(AggregateExpression(AggregateOp.MIN, expression, selector), resultType, context.model(rootEntityType(expression)))
 
-    suspend fun <R : Any> minExpr(resultType: KClass<R>, selector: LambdaExpression): R =
-        throw UnsupportedOperationException("Compile efkore with the compiler plugin")
+    suspend fun <R : Any> maxOfExpr(resultType: KClass<R>, selector: LambdaExpression): R =
+        context.executor.executeScalar(AggregateExpression(AggregateOp.MAX, expression, selector), resultType, context.model(rootEntityType(expression)))
 
-    suspend fun <R : Any> maxExpr(resultType: KClass<R>, selector: LambdaExpression): R =
-        throw UnsupportedOperationException("Compile efkore with the compiler plugin")
+    suspend fun <R : Any> averageOfExpr(resultType: KClass<R>, selector: LambdaExpression): R =
+        context.executor.executeScalar(AggregateExpression(AggregateOp.AVG, expression, selector), resultType, context.model(rootEntityType(expression)))
 
-    fun skip(count: Int): DbSet<T> =
-        DbSet(entityType, context, OffsetExpression(expression, count))
+    // Non-lambda operations — no plugin needed.
+    fun distinct(): DbSet<T> = DbSet(entityType, context, DistinctExpression(expression))
+    fun take(n: Int): DbSet<T> = DbSet(entityType, context, LimitExpression(expression, n))
+    fun drop(n: Int): DbSet<T> = DbSet(entityType, context, OffsetExpression(expression, n))
+    fun addAll(entities: Iterable<T>) { entities.forEach { add(it) } }
 
-    fun take(count: Int): DbSet<T> =
-        DbSet(entityType, context, LimitExpression(expression, count))
+    fun update(entity: T) {
+        context.changeTracker.track(entity, entityType, dev.efkore.tracking.EntityState.Modified)
+    }
 
-    fun distinct(): DbSet<T> =
-        DbSet(entityType, context, DistinctExpression(expression))
-
-    fun thenBy(keySelector: LambdaExpression): DbSet<T> =
-        DbSet(entityType, context, ThenByExpression(expression, keySelector, descending = false))
-
-    fun thenByDescending(keySelector: LambdaExpression): DbSet<T> =
-        DbSet(entityType, context, ThenByExpression(expression, keySelector, descending = true))
-
-    suspend fun find(vararg keys: Any?): T? {
-        val cacheKey = keys.toList()
-        if (cache.containsKey(cacheKey)) return cache[cacheKey]
-
+    suspend fun find(id: Any): T? {
         val model = context.model(entityType)
-        val keyColumns = model.columns.filter { it.isKey }
-        val keyValues = keyColumns.zip(keys.toList()).associate { (col, value) ->
-            col.columnName to value
-        }
-        val findExpr = FindExpression(entityType, keyValues)
-        val (sql, params) = translator.translate(findExpr)
-        val rows = context.executor.execute(sql, params)
-        val result = rows.map { Materializer(entityType, model).materialize(it) }.firstOrNull()
-        cache[cacheKey] = result
-        return result
+        val cached = context.changeTracker.findById(entityType, id, model)
+        if (cached != null) return cached
+
+        val pkProp = property(model.keyColumn.property)
+        val pred = lambdaExpr(paramExpr("it", entityType), eq(pkProp, constant(id)))
+        return filterExpr(pred).firstOrNull()
     }
 
-    suspend fun toList(): List<T> {
-        val (sql, params) = translator.translate(expression)
-        val rows = context.executor.execute(sql, params)
-        val materializer = Materializer(entityType, context.model(entityType))
-        return rows.map { materializer.materialize(it) }
-    }
+    suspend fun findOrNull(id: Any): T? = find(id)
 
-    suspend fun first(): T? = toList().firstOrNull()
+    // Terminals
+    suspend fun toList(): List<T> = context.executor.execute(expression, entityType, context.model(rootEntityType(expression)))
+    suspend fun first(): T = toList().first()
     suspend fun firstOrNull(): T? = toList().firstOrNull()
+    suspend fun single(): T = toList().single()
+    suspend fun singleOrNull(): T? = toList().singleOrNull()
 
-    fun add(entity: T): T {
-        changeTracker.add(entity)
-        return entity
+    suspend fun count(): Long =
+        context.executor.executeScalar(
+            AggregateExpression(AggregateOp.COUNT, expression, null),
+            Long::class, context.model(rootEntityType(expression))
+        )
+
+    suspend fun contains(entity: T): Boolean {
+        val model = context.model(entityType)
+        @Suppress("UNCHECKED_CAST")
+        val pkVal = (model.keyColumn.property as KMutableProperty1<T, *>).get(entity)!!
+        val pkProp = property(model.keyColumn.property)
+        val pred = lambdaExpr(paramExpr("it", entityType), eq(pkProp, constant(pkVal)))
+        return context.executor.executeExists(AnyExpression(expression, pred), model)
     }
 
-    fun remove(entity: T) {
-        changeTracker.remove(entity)
+    // Change tracking
+    @Suppress("UNCHECKED_CAST")
+    private fun rootEntityType(expr: Expression): KClass<Any> = when (expr) {
+        is QueryRootExpression -> expr.entityType as KClass<Any>
+        is FilterExpression    -> rootEntityType(expr.source)
+        is ProjectExpression   -> rootEntityType(expr.source)
+        is OrderByExpression   -> rootEntityType(expr.source)
+        is ThenByExpression    -> rootEntityType(expr.source)
+        is LimitExpression     -> rootEntityType(expr.source)
+        is OffsetExpression    -> rootEntityType(expr.source)
+        is DistinctExpression  -> rootEntityType(expr.source)
+        is AggregateExpression -> rootEntityType(expr.source)
+        is AnyExpression       -> rootEntityType(expr.source)
+        is AllExpression       -> rootEntityType(expr.source)
+        else -> throw IllegalStateException("No root in expression: $expr")
     }
 
-    fun update(entity: T): T {
-        val snapshot = changeTracker.takeSnapshot(entity)
-        changeTracker.track(entity, snapshot)
-        return entity
-    }
+    fun toSql(): dev.efkore.sql.BoundSql =
+        context.executor.toSql(expression, context.model(rootEntityType(expression)))
 
-    fun addAll(entities: Collection<T>): Collection<T> {
-        entities.forEach { add(it) }
-        return entities
-    }
-
-    suspend fun all(): List<T> = toList()
+    fun add(entity: T) { context.changeTracker.track(entity, entityType, dev.efkore.tracking.EntityState.Added) }
+    fun remove(entity: T) { context.changeTracker.track(entity, entityType, dev.efkore.tracking.EntityState.Deleted) }
 }

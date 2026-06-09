@@ -1,25 +1,27 @@
 [versions]
 kotlin = "2.3.0"
+zeko-sql-builder = "1.5.6"
 kotlinx-coroutines = "1.10.1"
 r2dbc-spi = "1.0.0.RELEASE"
 r2dbc-h2 = "1.0.0.RELEASE"
 slf4j = "2.0.16"
-junit-jupiter = "5.11.4"
 kctfork = "0.12.1"
+junit = "5.11.4"
 
 [libraries]
-kotlin-compiler-embeddable    = { module = "org.jetbrains.kotlin:kotlin-compiler-embeddable",   version.ref = "kotlin" }
-kotlin-gradle-plugin-api      = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin-api",     version.ref = "kotlin" }
 kotlinx-coroutines-core     = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core",     version.ref = "kotlinx-coroutines" }
 kotlinx-coroutines-reactive = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-reactive", version.ref = "kotlinx-coroutines" }
+kotlinx-coroutines-test     = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test",     version.ref = "kotlinx-coroutines" }
 kotlin-reflect              = { module = "org.jetbrains.kotlin:kotlin-reflect",               version.ref = "kotlin" }
+kotlin-compiler-embeddable  = { module = "org.jetbrains.kotlin:kotlin-compiler-embeddable",   version.ref = "kotlin" }
+kotlin-gradle-plugin-api    = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin-api",     version.ref = "kotlin" }
 r2dbc-spi                   = { module = "io.r2dbc:r2dbc-spi",                                version.ref = "r2dbc-spi" }
+r2dbc-h2                    = { module = "io.r2dbc:r2dbc-h2",                                 version.ref = "r2dbc-h2" }
 slf4j-api                   = { module = "org.slf4j:slf4j-api",                               version.ref = "slf4j" }
 slf4j-simple                = { module = "org.slf4j:slf4j-simple",                            version.ref = "slf4j" }
-junit-jupiter               = { module = "org.junit.jupiter:junit-jupiter",                   version.ref = "junit-jupiter" }
-kotlinx-coroutines-test     = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test",     version.ref = "kotlinx-coroutines" }
-r2dbc-h2                    = { module = "io.r2dbc:r2dbc-h2",                                 version.ref = "r2dbc-h2" }
-kctfork-core                = { module = "dev.zacsweers.kctfork:core",                          version.ref = "kctfork" }
+kctfork-core                = { module = "dev.zacsweers.kctfork:core",                        version.ref = "kctfork" }
+junit-jupiter               = { module = "org.junit.jupiter:junit-jupiter",                   version.ref = "junit" }
+zeko-sql-builder            = { module = "io.zeko:zeko-sql-builder",                           version.ref = "zeko-sql-builder" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }

@@ -80,10 +80,10 @@ class EfkoreIrTransformer(private val ctx: IrPluginContext) : IrElementTransform
             "thenByDescending"   -> rewriteSortedBy(visited, descending = true, exprMethod = "thenByDescendingExpr")
             "any"                -> rewriteFilterStyle(visited, "anyExpr")
             "all"                -> rewriteFilterStyle(visited, "allExpr")
-            "sum"                -> rewriteAggregateStyle(visited, "sumExpr")
-            "avg"                -> rewriteAggregateStyle(visited, "avgExpr")
-            "min"                -> rewriteAggregateStyle(visited, "minExpr")
-            "max"                -> rewriteAggregateStyle(visited, "maxExpr")
+            "sumOf"              -> rewriteAggregateStyle(visited, "sumOfExpr")
+            "minOf"              -> rewriteAggregateStyle(visited, "minOfExpr")
+            "maxOf"              -> rewriteAggregateStyle(visited, "maxOfExpr")
+            "averageOf"          -> rewriteAggregateStyle(visited, "averageOfExpr")
             else                 -> visited
         }
     }
@@ -143,7 +143,7 @@ class EfkoreIrTransformer(private val ctx: IrPluginContext) : IrElementTransform
         return irCall(dbSetMethod(exprMethod), call.type, call.dispatchReceiver!!, lambdaIr)
     }
 
-    // sum/avg/min/max: pass KClass + lambda to *Expr
+    // sumOf/minOf/maxOf/averageOf: pass KClass + lambda to *Expr
     private fun rewriteAggregateStyle(call: IrCall, exprMethod: String): IrExpression {
         val lambda = extractLambda(call) ?: return call
         val param = lambdaParam(lambda)

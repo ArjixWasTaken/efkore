@@ -2,16 +2,26 @@ plugins {
     alias(libs.plugins.kotlin.jvm)
     `java-gradle-plugin`
 }
-repositories { mavenCentral() }
-dependencies {
-    implementation(project(":compiler"))
-    compileOnly(libs.kotlin.gradle.plugin.api)
+
+repositories {
+    mavenCentral()
+    mavenLocal()
 }
+
+dependencies {
+    implementation(libs.kotlin.gradle.plugin.api)
+    implementation(project(":compiler"))
+}
+
 gradlePlugin {
     plugins {
-        register("efkore") {
+        create("efkore") {
             id = "dev.efkore"
             implementationClass = "dev.efkore.gradle.EfkoreGradlePlugin"
         }
     }
+}
+
+java {
+    toolchain { languageVersion = JavaLanguageVersion.of(21) }
 }
