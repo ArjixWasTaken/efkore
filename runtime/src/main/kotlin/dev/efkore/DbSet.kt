@@ -13,6 +13,7 @@ class DbSet<T : Any>(
     internal val changeTracker: ChangeTracker<T> = ChangeTracker(entityType)
 ) {
     private val translator = ZekoTranslator()
+    private val cache = mutableMapOf<List<Any?>, T?>()
 
     // Lambda overloads — plugin rewrites to *Expr calls; throw at runtime without plugin.
     fun filter(predicate: (T) -> Boolean): DbSet<T> =
@@ -105,6 +106,9 @@ class DbSet<T : Any>(
         DbSet(entityType, context, ThenByExpression(expression, keySelector, descending = true))
 
     suspend fun find(vararg keys: Any?): T? {
+        val cacheKey = keys.toList()
+        if (cache.containsKey(cacheKey)) return cache[cacheKey]
+
         val model = context.model(entityType)
         val keyColumns = model.columns.filter { it.isKey }
         val keyValues = keyColumns.zip(keys.toList()).associate { (col, value) ->
@@ -113,7 +117,9 @@ class DbSet<T : Any>(
         val findExpr = FindExpression(entityType, keyValues)
         val (sql, params) = translator.translate(findExpr)
         val rows = context.executor.execute(sql, params)
-        return rows.map { Materializer(entityType, model).materialize(it) }.firstOrNull()
+        val result = rows.map { Materializer(entityType, model).materialize(it) }.firstOrNull()
+        cache[cacheKey] = result
+        return result
     }
 
     suspend fun toList(): List<T> {
@@ -134,4 +140,17 @@ class DbSet<T : Any>(
     fun remove(entity: T) {
         changeTracker.remove(entity)
     }
+
+    fun update(entity: T): T {
+        val snapshot = changeTracker.takeSnapshot(entity)
+        changeTracker.track(entity, snapshot)
+        return entity
+    }
+
+    fun addAll(entities: Collection<T>): Collection<T> {
+        entities.forEach { add(it) }
+        return entities
+    }
+
+    suspend fun all(): List<T> = toList()
 }
