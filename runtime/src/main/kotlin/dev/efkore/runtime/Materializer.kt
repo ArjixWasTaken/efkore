@@ -13,7 +13,7 @@ object Materializer {
         val colNames = meta.columnMetadatas.map { it.name.lowercase() }
         if (colNames.size == 1 && type != model.entityClass) {
             @Suppress("UNCHECKED_CAST")
-            return row.get(0, type.java) as T
+            return row.get(0, type.javaObjectType) as T
         }
 
         // Full entity: try primary constructor match first (only if it takes parameters).
@@ -23,7 +23,7 @@ object Materializer {
                 val colName = model.columns.find {
                     it.property.name == param.name
                 }?.columnName ?: param.name!!.lowercase()
-                row.get(colName, param.type.classifier.let { (it as KClass<*>).java })
+                row.get(colName, param.type.classifier.let { (it as KClass<*>).javaObjectType })
             }
             return ctor.callBy(args)
         }

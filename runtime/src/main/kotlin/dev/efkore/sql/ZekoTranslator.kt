@@ -150,6 +150,17 @@ class ZekoTranslator(private val dialect: SqlDialect = SqlDialect.H2) {
         }
         is IsNullExpression    -> "${q(colName(expr.property, model))} IS NULL"
         is IsNotNullExpression -> "${q(colName(expr.property, model))} IS NOT NULL"
+        is InListExpression -> {
+            if (expr.values.isEmpty()) {
+                "1 = 0"
+            } else {
+                val markers = expr.values.map { v ->
+                    params.add(v)
+                    paramMarker(idx.incrementAndGet())
+                }
+                "${q(colName(expr.target, model))} IN (${markers.joinToString(", ")})"
+            }
+        }
         is UnaryExpression     -> "NOT (${buildCond(expr.operand, model, params, idx)})"
         else -> throw IllegalArgumentException("Cannot convert $expr to SQL condition")
     }

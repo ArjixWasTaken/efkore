@@ -303,6 +303,81 @@ class EndToEndTest {
     }
 
     @Test
+    fun `in-operator predicates rewrite to range comparisons and IN lists`() {
+        val snippet = SourceFile.kotlin(
+            "InOperator.kt",
+            """
+            package test
+
+            import dev.efkore.DbContextOptions
+            import io.r2dbc.h2.H2ConnectionConfiguration
+            import io.r2dbc.h2.H2ConnectionFactory
+            import kotlinx.coroutines.runBlocking
+
+            fun main() {
+                val factory = H2ConnectionFactory(
+                    H2ConnectionConfiguration.builder()
+                        .inMemory("et_in_" + System.nanoTime())
+                        .option("DB_CLOSE_DELAY=-1")
+                        .build()
+                )
+                val ctx = BloggingContext(DbContextOptions(factory))
+                runBlocking {
+                    ctx.database.ensureCreated()
+                    ctx.blogs.add(Blog().apply { url = "https://one.example.com";   rating = 1 })
+                    ctx.blogs.add(Blog().apply { url = "https://three.example.com"; rating = 3 })
+                    ctx.blogs.add(Blog().apply { url = "https://four.example.com";  rating = 4 })
+                    ctx.blogs.add(Blog().apply { url = "https://five.example.com";  rating = 5 })
+                    ctx.saveChanges()
+
+                    val inList = ctx.blogs.filter { it.rating in listOf(1, 5) }.map { it.url }.toList()
+                    inList.sorted().forEach { println("inList=" + it) }
+
+                    val inRange = ctx.blogs.filter { it.rating in 2..4 }.map { it.url }.toList()
+                    inRange.sorted().forEach { println("inRange=" + it) }
+
+                    val inRangeUntil = ctx.blogs.filter { it.rating in 2..<4 }.map { it.url }.toList()
+                    inRangeUntil.sorted().forEach { println("inRangeUntil=" + it) }
+
+                    val notInList = ctx.blogs.filter { it.rating !in listOf(1, 4) }.map { it.url }.toList()
+                    notInList.sorted().forEach { println("notInList=" + it) }
+
+                    val allowed = listOf(3, 4)
+                    val captured = ctx.blogs.filter { it.rating in allowed }.map { it.url }.toList()
+                    captured.sorted().forEach { println("captured=" + it) }
+
+                    val sql = ctx.blogs.filter { it.rating in listOf(1, 5) }.toSql()
+                    println("sqlHasIn=" + sql.sql.contains("IN (?, ?)"))
+                }
+            }
+            """
+        )
+        val result = compile(blogEntity, contextClass, snippet)
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode) { "Compilation failed:\n${result.messages}" }
+        val output = runMain(result, "test.InOperatorKt")
+
+        assertTrue(output.contains("inList=https://one.example.com")) { "in list missing rating 1: $output" }
+        assertTrue(output.contains("inList=https://five.example.com")) { "in list missing rating 5: $output" }
+        assertFalse(output.contains("inList=https://three.example.com")) { "in list should exclude rating 3: $output" }
+
+        assertTrue(output.contains("inRange=https://three.example.com")) { "closed range missing rating 3: $output" }
+        assertTrue(output.contains("inRange=https://four.example.com")) { "closed range missing rating 4: $output" }
+        assertFalse(output.contains("inRange=https://five.example.com")) { "closed range should exclude rating 5: $output" }
+
+        assertTrue(output.contains("inRangeUntil=https://three.example.com")) { "open range missing rating 3: $output" }
+        assertFalse(output.contains("inRangeUntil=https://four.example.com")) { "open range should exclude rating 4: $output" }
+
+        assertTrue(output.contains("notInList=https://three.example.com")) { "!in missing rating 3: $output" }
+        assertTrue(output.contains("notInList=https://five.example.com")) { "!in missing rating 5: $output" }
+        assertFalse(output.contains("notInList=https://one.example.com")) { "!in should exclude rating 1: $output" }
+
+        assertTrue(output.contains("captured=https://three.example.com")) { "captured list missing rating 3: $output" }
+        assertFalse(output.contains("captured=https://five.example.com")) { "captured list should exclude rating 5: $output" }
+
+        assertTrue(output.contains("sqlHasIn=true")) { "IN pushdown missing from generated SQL: $output" }
+    }
+
+    @Test
     fun `plugin falls back gracefully for unsupported expression`() {
         val badLambda = SourceFile.kotlin(
             "Bad.kt",

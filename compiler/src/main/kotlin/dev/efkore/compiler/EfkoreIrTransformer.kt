@@ -52,6 +52,7 @@ class EfkoreIrTransformer(private val ctx: IrPluginContext) : IrElementTransform
     private val fnStringContains   get() = fn(EXPR_PKG, "stringContains")
     private val fnIsNullPred       get() = fn(EXPR_PKG, "isNullPred")
     private val fnIsNotNullPred    get() = fn(EXPR_PKG, "isNotNullPred")
+    private val fnInListPred       get() = fn(EXPR_PKG, "inListPred")
 
     private val dbSetClassId = ClassId(FqName("dev.efkore"), Name.identifier("DbSet"))
 
@@ -210,6 +211,16 @@ class EfkoreIrTransformer(private val ctx: IrPluginContext) : IrElementTransform
             IrStatementOrigin.ANDAND -> buildBinary(fnAnd, call, param)
             IrStatementOrigin.OROR   -> buildBinary(fnOr, call, param)
             IrStatementOrigin.EXCL   -> buildUnary(call, param)
+            IrStatementOrigin.IN     -> buildInIr(call, param)
+            IrStatementOrigin.NOT_IN -> {
+                // `!in` appears as not() wrapping the contains call; both carry NOT_IN
+                val inner = call.dispatchReceiver as? IrCall
+                if (call.symbol.owner.name.asString() == "not" && inner != null) {
+                    irBuilderCall(fnNot, buildInIr(inner, param))
+                } else {
+                    buildInIr(call, param)
+                }
+            }
             else -> throw UnsupportedQueryExpression("Unsupported operator origin $origin")
         }
     }
@@ -266,6 +277,32 @@ class EfkoreIrTransformer(private val ctx: IrPluginContext) : IrElementTransform
         if (rawArg !is IrConst) throw UnsupportedQueryExpression("String predicate requires a literal argument")
         val argIr = buildConstantCall(rawArg)
         return irBuilderCall(builderFn, propIr, argIr)
+    }
+
+    // it.prop in 2..4 / 2..<4 / until → comparisons; it.prop in someCollection → IN (...)
+    private fun buildInIr(containsCall: IrCall, param: IrValueParameter): IrExpression {
+        if (containsCall.symbol.owner.name.asString() != "contains")
+            throw UnsupportedQueryExpression("Unsupported in-operator call: ${containsCall.render()}")
+        val recv = containsCall.dispatchReceiver ?: containsCall.extensionReceiver
+            ?: throw UnsupportedQueryExpression("in-operator has no receiver")
+        val target = containsCall.getValueArgument(0)
+            ?: throw UnsupportedQueryExpression("in-operator has no argument")
+        if (target !is IrCall || !target.isPropertyGetterOn(param))
+            throw UnsupportedQueryExpression("in-operator target must be a property access (it.prop)")
+
+        val rangeFactory = (recv as? IrCall)?.symbol?.owner?.name?.asString()
+        if (rangeFactory in setOf("rangeTo", "rangeUntil", "until")) {
+            val (lo, hi) = rawBinaryArgs(recv as IrCall)
+            val upperFn = if (rangeFactory == "rangeTo") fnLe else fnLt
+            val lower = irBuilderCall(fnGe, buildPropertyRef(target), buildExpr(lo, param))
+            val upper = irBuilderCall(upperFn, buildPropertyRef(target), buildExpr(hi, param))
+            return irBuilderCall(fnAnd, lower, upper)
+        }
+
+        val recvClass = recv.type.classOrNull?.owner
+        if (recvClass == null || !recvClass.isSubclassOf(ctx.irBuiltIns.collectionClass.owner))
+            throw UnsupportedQueryExpression("in-operator receiver must be a Collection or numeric range")
+        return irBuilderCall(fnInListPred, buildPropertyRef(target), recv)
     }
 
     private fun buildNullCheckIr(propIr: IrExpression, isNotNull: Boolean): IrExpression {

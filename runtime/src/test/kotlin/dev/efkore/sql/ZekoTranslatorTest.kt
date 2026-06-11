@@ -121,6 +121,46 @@ class ZekoTranslatorTest {
     }
 
     @Test
+    fun `in list generates IN with one marker per value`() {
+        val pred = InListExpression(PropertyExpression(ratingProp.property), listOf(1, 3, 5))
+        val filter = FilterExpression(root, lambdaExpr(param, pred))
+
+        val bound = translator.translate(filter, model)
+        assertTrue(bound.sql.contains("""WHERE "rating" IN (?, ?, ?)""")) { "SQL: ${bound.sql}" }
+        assertEquals(listOf(1, 3, 5), bound.params)
+    }
+
+    @Test
+    fun `negated in list generates NOT around IN`() {
+        val pred = not(InListExpression(PropertyExpression(ratingProp.property), listOf(1, 3)))
+        val filter = FilterExpression(root, lambdaExpr(param, pred))
+
+        val bound = translator.translate(filter, model)
+        assertTrue(bound.sql.contains("""NOT ("rating" IN (?, ?))""")) { "SQL: ${bound.sql}" }
+        assertEquals(listOf(1, 3), bound.params)
+    }
+
+    @Test
+    fun `empty in list generates constant false without params`() {
+        val pred = InListExpression(PropertyExpression(ratingProp.property), emptyList())
+        val filter = FilterExpression(root, lambdaExpr(param, pred))
+
+        val bound = translator.translate(filter, model)
+        assertTrue(bound.sql.contains("1 = 0")) { "SQL: ${bound.sql}" }
+        assertTrue(bound.params.isEmpty())
+    }
+
+    @Test
+    fun `in list uses dollar-N markers on postgres`() {
+        val pred = InListExpression(PropertyExpression(ratingProp.property), listOf(1, 3))
+        val filter = FilterExpression(root, lambdaExpr(param, pred))
+
+        val bound = postgresTranslator.translate(filter, model)
+        assertTrue(bound.sql.contains("""IN (${'$'}1, ${'$'}2)""")) { "SQL: ${bound.sql}" }
+        assertEquals(listOf(1, 3), bound.params)
+    }
+
+    @Test
     fun `compound AND condition param order matches marker order`() {
         val pred = and(
             gt(property(ratingProp.property), constant(3)),

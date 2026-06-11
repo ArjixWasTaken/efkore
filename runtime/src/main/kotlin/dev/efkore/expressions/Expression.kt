@@ -49,6 +49,9 @@ data class StringCallExpression(
 data class IsNullExpression(val property: PropertyExpression) : Expression()
 data class IsNotNullExpression(val property: PropertyExpression) : Expression()
 
+// `it.prop in listOf(...)` — values resolved at runtime, one bind param per element
+data class InListExpression(val target: PropertyExpression, val values: Collection<Any?>) : Expression()
+
 // Thin builders referenced by the compiler plugin to emit string/null predicate nodes
 fun stringStartsWith(target: PropertyExpression, arg: ConstantExpression): StringCallExpression =
     StringCallExpression(StringOp.STARTS_WITH, target, arg)
@@ -58,3 +61,5 @@ fun stringContains(target: PropertyExpression, arg: ConstantExpression): StringC
     StringCallExpression(StringOp.CONTAINS, target, arg)
 fun isNullPred(property: PropertyExpression): IsNullExpression = IsNullExpression(property)
 fun isNotNullPred(property: PropertyExpression): IsNotNullExpression = IsNotNullExpression(property)
+fun inListPred(target: PropertyExpression, values: Collection<Any?>): InListExpression =
+    InListExpression(target, values)

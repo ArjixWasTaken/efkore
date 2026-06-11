@@ -35,6 +35,11 @@
 - QuerySliceTest - 13 integration tests on in-mem H2
 - EndToEndTest - 9 compiler plugin e2e tests (kctfork is amazing) !! 
 
+- range membership: it.rating in 2..4 / 2..<4 / until → >= AND <(=) comparisons
+- in w/ collection: it.rating in listOf(1,3,5) → IN (...) (works w/ captured vals too)
+- !in variants → NOT (...) wrapper (same semantics as NOT IN / NOT BETWEEN)
+- Materializer fix - ctor params w/ Kotlin Int used primitive int.class, h2 codec choked ("Cannot decode value of type int") - javaObjectType now
+
 ## what's next (kinda rough order)
 
 ### query stuff
@@ -110,9 +115,6 @@
 
 ### compiler plugin gaps
 - better diagnostics - compiler warning when lambda cant be rewritten (not just runtime throw)
-- range membership: it.rating in 2..<4 → rating >= 2 AND rating < 4
-- in w/ collection: it.rating in listOf(1,3,5) → IN (...)
-- !in variants for both → NOT BETWEEN / NOT IN
 - when expression in predicate - desugar to AND/OR chain
 - if expression in predicate (same as when, diff ir shape)
 - string endsWith rewrite (builder exists, plugin dispatch missing -_-)
