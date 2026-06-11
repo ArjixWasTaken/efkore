@@ -7,5 +7,6 @@ import dev.efkore.metadata.*
 data class Blog(
     @Id @GeneratedValue var id: Int = 0,
     @Column("url") var url: String = "",
-    @Column("rating") var rating: Int = 0
+    @Column("rating") var rating: Int = 0,
+    @Ignore var localNote: String = ""
 )

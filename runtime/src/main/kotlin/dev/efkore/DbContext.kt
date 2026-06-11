@@ -155,4 +155,17 @@ class DatabaseFacade(private val ctx: DbContext) {
             }
         }
     }
+
+    suspend fun ensureDeleted() {
+        ctx.executor.withConnection { conn ->
+            ctx.models.values.forEach { model ->
+                val ddl = "DROP TABLE IF EXISTS \"${model.tableName}\""
+                log.debug("DDL: {}", ddl)
+                conn.createStatement(ddl).execute().awaitFirstOrNull()
+            }
+        }
+    }
+
+    suspend fun executeSql(sql: String, vararg params: Any?): Long =
+        ctx.executor.executeUpdate(sql, params.toList())
 }

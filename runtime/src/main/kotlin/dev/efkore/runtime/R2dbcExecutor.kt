@@ -2,6 +2,7 @@ package dev.efkore.runtime
 
 import dev.efkore.expressions.AllExpression
 import dev.efkore.expressions.Expression
+import dev.efkore.expressions.LambdaExpression
 import dev.efkore.metadata.EntityModel
 import dev.efkore.sql.SqlDialect
 import dev.efkore.sql.BoundSql
@@ -27,7 +28,15 @@ class R2dbcExecutor(
     suspend fun <T : Any> execute(expr: Expression, entityType: KClass<T>, model: EntityModel<*>): List<T> {
         val bound = translator.translate(expr, model)
         log.debug("SQL: {} | params: {}", bound.sql, bound.params)
+        return executeQuery(bound, entityType, model)
+    }
 
+    suspend fun <T : Any> executeRawQuery(sql: String, params: List<Any?>, entityType: KClass<T>, model: EntityModel<*>): List<T> {
+        log.debug("RAW SQL: {} | params: {}", sql, params)
+        return executeQuery(BoundSql(sql, params), entityType, model)
+    }
+
+    private suspend fun <T : Any> executeQuery(bound: BoundSql, entityType: KClass<T>, model: EntityModel<*>): List<T> {
         val conn = connectionFactory.create().awaitFirst()
         return try {
             val stmt = conn.createStatement(bound.sql)
@@ -39,6 +48,23 @@ class R2dbcExecutor(
                 .flatten()
         } finally {
             conn.close().awaitFirstOrNull()
+        }
+    }
+
+    suspend fun executeDelete(predicate: LambdaExpression, model: EntityModel<*>): Long {
+        val bound = translator.translateDelete(predicate, model)
+        return executeUpdate(bound.sql, bound.params)
+    }
+
+    suspend fun executeUpdate(sql: String, params: List<Any?>): Long {
+        log.debug("DML SQL: {} | params: {}", sql, params)
+        return withConnection { conn ->
+            val stmt = conn.createStatement(sql)
+            params.forEachIndexed { i, v -> stmt.bind(i, v!!) }
+            stmt.execute().asFlow()
+                .map { result -> result.rowsUpdated.asFlow().toList().sum() }
+                .toList()
+                .sum()
         }
     }
 

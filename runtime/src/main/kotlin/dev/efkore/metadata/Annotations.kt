@@ -19,3 +19,10 @@ annotation class GeneratedValue
 @Target(AnnotationTarget.PROPERTY, AnnotationTarget.FIELD)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class Column(val name: String = "")
+
+@Target(AnnotationTarget.PROPERTY, AnnotationTarget.FIELD)
+@Retention(AnnotationRetention.RUNTIME)
+annotation class Ignore
+
+// JPA-compat alias; shadows kotlin.jvm.Transient when imported from this package
+typealias Transient = Ignore

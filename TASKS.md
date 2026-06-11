@@ -40,6 +40,13 @@
 - !in variants → NOT (...) wrapper (same semantics as NOT IN / NOT BETWEEN)
 - Materializer fix - ctor params w/ Kotlin Int used primitive int.class, h2 codec choked ("Cannot decode value of type int") - javaObjectType now
 
+- @Ignore - exclude property from column mapping (ddl, insert/update, materialize, dirty detect)
+- @Transient - typealias for @Ignore (jpa compat)
+- ensureDeleted() - DROP TABLE IF EXISTS for all registered models
+- fromSql<T>("SELECT...") on DbSet - raw sql to entity mapping w/ bind params
+- executeSql("UPDATE...") on database facade - arbitrary dml, returns affected rows
+- removeWhere { predicate } - bulk DELETE with WHERE, no load-then-delete, bypasses tracker
+
 ## what's next (kinda rough order)
 
 ### query stuff
@@ -70,16 +77,12 @@
 - built-in soft-delete pattern wired to global filter
 
 ### mapping stuff
-- @Ignore - exclude property from column mapping
 - @ValueConverter - enum→String, Instant→Long etc
 - @ColumnDefault for ddl defaults
 - @Computed - read-only, excluded from insert/update
-- @Transient alias for @Ignore (jpa compat)
 - backing-field support - map to private var _field
 
 ### raw sql / escape hatches
-- fromSql<T>("SELECT...") - raw sql to entity mapping
-- executeSql("UPDATE...") - arbitrary dml
 - DbSet.fromSql { ... } - mix raw sql as query source, then chain filter etc.
 
 ### inheritance
@@ -99,12 +102,10 @@
 - nested transactions (savepoints)
 
 ### schema / ddl
-- ensureDeleted() - drop tables
 - migrate() - schema diff, incremental ddl (add column, add table at minimum)
 - foreign key / index via annotations
 
 ### dbset ops
-- removeWhere { predicate } - bulk DELETE with WHERE (no load-then-delete)
 - updateWhere { predicate } set { ... } - bulk UPDATE
 - upsert / insertOrUpdate
 

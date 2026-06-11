@@ -20,6 +20,7 @@ class EntityModel<T : Any>(val entityClass: KClass<T>) {
 
     val columns: List<ColumnInfo> = entityClass.memberProperties
         .filterIsInstance<KMutableProperty1<*, *>>()
+        .filter { it.findAnnotation<Ignore>() == null }
         .map { prop ->
             val colAnn = prop.findAnnotation<Column>()
             val colName = colAnn?.name?.takeIf { it.isNotEmpty() } ?: prop.name.lowercase()

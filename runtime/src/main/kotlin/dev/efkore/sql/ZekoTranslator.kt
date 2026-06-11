@@ -99,6 +99,13 @@ class ZekoTranslator(private val dialect: SqlDialect = SqlDialect.H2) {
         return BoundSql(query.toSql(), params)
     }
 
+    fun translateDelete(predicate: LambdaExpression, model: EntityModel<*>): BoundSql {
+        val params = mutableListOf<Any?>()
+        val idx = AtomicInteger(0)
+        val cond = buildCond(predicate.body, model, params, idx)
+        return BoundSql("DELETE FROM ${q(model.tableName)} WHERE $cond", params)
+    }
+
     private fun translateExists(
         source: Expression,
         predicate: LambdaExpression,

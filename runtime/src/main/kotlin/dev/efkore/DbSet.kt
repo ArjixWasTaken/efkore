@@ -34,6 +34,9 @@ class DbSet<T : Any>(
     suspend fun all(predicate: (T) -> Boolean): Boolean =
         throw UnsupportedOperationException("Compile efkore with the compiler plugin")
 
+    suspend fun removeWhere(predicate: (T) -> Boolean): Long =
+        throw UnsupportedOperationException("Compile efkore with the compiler plugin")
+
     suspend fun <R : Any> sumOf(selector: (T) -> R): R =
         throw UnsupportedOperationException("Compile efkore with the compiler plugin")
 
@@ -72,6 +75,10 @@ class DbSet<T : Any>(
     suspend fun allExpr(predicate: LambdaExpression): Boolean =
         context.executor.executeExists(AllExpression(expression, predicate), context.model(rootEntityType(expression)))
 
+    // Bulk DELETE; bypasses the change tracker, no entities are loaded.
+    suspend fun removeWhereExpr(predicate: LambdaExpression): Long =
+        context.executor.executeDelete(predicate, context.model(rootEntityType(expression)))
+
     suspend fun <R : Any> sumOfExpr(resultType: KClass<R>, selector: LambdaExpression): R =
         context.executor.executeScalar(AggregateExpression(AggregateOp.SUM, expression, selector), resultType, context.model(rootEntityType(expression)))
 
@@ -105,6 +112,10 @@ class DbSet<T : Any>(
     }
 
     suspend fun findOrNull(id: Any): T? = find(id)
+
+    // Raw SQL escape hatch — rows mapped to T like a normal query.
+    suspend fun fromSql(sql: String, vararg params: Any?): List<T> =
+        context.executor.executeRawQuery(sql, params.toList(), entityType, context.model(entityType))
 
     // Terminals
     suspend fun toList(): List<T> = context.executor.execute(expression, entityType, context.model(rootEntityType(expression)))

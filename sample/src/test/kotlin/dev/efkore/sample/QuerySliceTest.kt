@@ -236,4 +236,79 @@ class QuerySliceTest {
         }
         assertTrue(threw)
     }
+
+    @Test
+    fun `ensureDeleted drops tables`() = runTest {
+        val ctx = makeContext("ensure_deleted_test")
+        ctx.database.ensureCreated()
+
+        ctx.blogs.add(Blog(url = "https://x.example.com", rating = 1))
+        ctx.saveChanges()
+        assertEquals(1L, ctx.blogs.count())
+
+        ctx.database.ensureDeleted()
+        ctx.database.ensureCreated()
+        assertEquals(0L, ctx.blogs.count())
+    }
+
+    @Test
+    fun `fromSql maps raw rows to entities`() = runTest {
+        val ctx = makeContext("fromsql_test")
+        ctx.database.ensureCreated()
+
+        ctx.blogs.add(Blog(url = "https://high.example.com", rating = 5))
+        ctx.blogs.add(Blog(url = "https://low.example.com", rating = 1))
+        ctx.saveChanges()
+
+        val rows = ctx.blogs.fromSql("""SELECT * FROM "blogs" WHERE "rating" > ?""", 3)
+        assertEquals(1, rows.size)
+        assertEquals("https://high.example.com", rows[0].url)
+        assertEquals(5, rows[0].rating)
+    }
+
+    @Test
+    fun `executeSql runs arbitrary dml and reports affected rows`() = runTest {
+        val ctx = makeContext("executesql_test")
+        ctx.database.ensureCreated()
+
+        ctx.blogs.add(Blog(url = "https://a.example.com", rating = 1))
+        ctx.blogs.add(Blog(url = "https://b.example.com", rating = 5))
+        ctx.saveChanges()
+
+        val updated = ctx.database.executeSql("""UPDATE "blogs" SET "rating" = ? WHERE "rating" < ?""", 9, 3)
+        assertEquals(1L, updated)
+
+        val bumped = ctx.blogs.filter { it.rating == 9 }.toList()
+        assertEquals(1, bumped.size)
+        assertEquals("https://a.example.com", bumped[0].url)
+    }
+
+    @Test
+    fun `ignored property is not persisted but entity materializes with default`() = runTest {
+        val ctx = makeContext("ignore_test")
+        ctx.database.ensureCreated()
+
+        ctx.blogs.add(Blog(url = "https://x.example.com", rating = 2, localNote = "scratch"))
+        ctx.saveChanges()
+
+        val loaded = ctx.blogs.toList().single()
+        assertEquals("https://x.example.com", loaded.url)
+        assertEquals("", loaded.localNote) { "@Ignore property should not round-trip" }
+    }
+
+    @Test
+    fun `removeWhere bulk deletes matching rows without loading`() = runTest {
+        val ctx = makeContext("removewhere_test")
+        ctx.database.ensureCreated()
+
+        ctx.blogs.add(Blog(url = "https://one.example.com", rating = 1))
+        ctx.blogs.add(Blog(url = "https://four.example.com", rating = 4))
+        ctx.blogs.add(Blog(url = "https://five.example.com", rating = 5))
+        ctx.saveChanges()
+
+        val removed = ctx.blogs.removeWhere { it.rating < 4 }
+        assertEquals(1L, removed)
+        assertEquals(2L, ctx.blogs.count())
+        assertEquals(0, ctx.blogs.filter { it.rating == 1 }.toList().size)
+    }
 }

@@ -161,6 +161,15 @@ class ZekoTranslatorTest {
     }
 
     @Test
+    fun `translateDelete generates DELETE with WHERE condition`() {
+        val pred = lambdaExpr(param, gt(property(ratingProp.property), constant(3)))
+
+        val bound = translator.translateDelete(pred, model)
+        assertEquals("""DELETE FROM "blog" WHERE "rating" > ?""", bound.sql)
+        assertEquals(listOf(3), bound.params)
+    }
+
+    @Test
     fun `compound AND condition param order matches marker order`() {
         val pred = and(
             gt(property(ratingProp.property), constant(3)),

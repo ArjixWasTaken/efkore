@@ -19,12 +19,13 @@ object Materializer {
         // Full entity: try primary constructor match first (only if it takes parameters).
         val ctor = type.primaryConstructor
         if (ctor != null && ctor.parameters.isNotEmpty()) {
-            val args = ctor.parameters.associateWith { param ->
-                val colName = model.columns.find {
-                    it.property.name == param.name
-                }?.columnName ?: param.name!!.lowercase()
-                row.get(colName, param.type.classifier.let { (it as KClass<*>).javaObjectType })
-            }
+            val args = ctor.parameters.mapNotNull { param ->
+                val col = model.columns.find { it.property.name == param.name }
+                // Unmapped (@Ignore) params with a default fall back to it.
+                if (col == null && param.isOptional) return@mapNotNull null
+                val colName = col?.columnName ?: param.name!!.lowercase()
+                param to row.get(colName, param.type.classifier.let { (it as KClass<*>).javaObjectType })
+            }.toMap()
             return ctor.callBy(args)
         }
 

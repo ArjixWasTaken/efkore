@@ -81,6 +81,7 @@ class EfkoreIrTransformer(private val ctx: IrPluginContext) : IrElementTransform
             "thenByDescending"   -> rewriteSortedBy(visited, descending = true, exprMethod = "thenByDescendingExpr")
             "any"                -> rewriteFilterStyle(visited, "anyExpr")
             "all"                -> rewriteFilterStyle(visited, "allExpr")
+            "removeWhere"        -> rewriteFilterStyle(visited, "removeWhereExpr")
             "sumOf"              -> rewriteAggregateStyle(visited, "sumOfExpr")
             "minOf"              -> rewriteAggregateStyle(visited, "minOfExpr")
             "maxOf"              -> rewriteAggregateStyle(visited, "maxOfExpr")
